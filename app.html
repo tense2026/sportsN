@@ -301,6 +301,19 @@
         <button type="submit" class="btn-primary w-full py-3.5 rounded-xl text-sm font-bold text-white mt-4">로그인하기</button>
       </form>
       
+      <!-- Google Login -->
+      <div class="mt-4 border-t border-white/10 pt-4">
+        <button type="button" onclick="handleGoogleLogin()" class="w-full flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 transition-colors py-3.5 rounded-xl text-sm font-bold text-white border border-white/10">
+          <svg class="w-5 h-5" viewBox="0 0 24 24">
+            <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+          </svg>
+          Google 계정으로 로그인
+        </button>
+      </div>
+      
       <!-- Register Form -->
       <form id="form-register" class="space-y-4 hidden" onsubmit="handleRegister(event)">
         <div class="space-y-1.5">
@@ -552,6 +565,17 @@
   <!-- ════════════════════════════════════════
        JAVASCRIPT
   ═════════════════════════════════════════ -->
+  <!-- Firebase SDK (Compat Version) -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+  <!-- PortOne SDK -->
+  <script src="https://cdn.iamport.kr/v1/iamport.js"></script>
+
+  <!-- Firebase Config -->
+  <script src="firebase_config.js"></script>
+
   <!-- Leaflet.js Script -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   
@@ -573,7 +597,29 @@
       onlyAvailable: false
     };
 
-    // ── Toast System ──
+    // ── Firebase & Fallback State ──
+    let isFirebaseEnabled = false;
+    let db = null;
+    let auth = null;
+
+    function initFirebase() {
+      try {
+        if (window.firebaseConfig && window.firebaseConfig.apiKey && window.firebaseConfig.projectId) {
+          firebase.initializeApp(window.firebaseConfig);
+          db = firebase.firestore();
+          auth = firebase.auth();
+          isFirebaseEnabled = true;
+          console.log("Firebase initialized successfully. Real-time Database is active.");
+        } else {
+          console.log("Firebase config not found. Falling back to LocalStorage.");
+        }
+      } catch (error) {
+        console.error("Firebase initialization failed:", error);
+        console.log("Falling back to LocalStorage.");
+      }
+    }
+
+    // ── Global Toast System ──
     function showToast(msg, type = 'success') {
       const t = document.createElement('div');
       t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:rgba(13,26,36,0.95);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:12px 20px;color:white;font-size:14px;font-weight:500;z-index:99999;display:flex;align-items:center;gap:10px;box-shadow:0 8px 32px rgba(0,0,0,0.5);animation:fadeUp 0.4s ease-out;';
@@ -713,6 +759,73 @@
       requestUserLocation();
     }
 
+    let facilitiesUnsubscribe = null;
+
+    function syncFacilitiesData(lat, lng) {
+      if (facilitiesUnsubscribe) {
+        facilitiesUnsubscribe();
+        facilitiesUnsubscribe = null;
+      }
+
+      if (isFirebaseEnabled) {
+        db.collection('facilities').get().then(snapshot => {
+          if (snapshot.empty) {
+            console.log("Firestore facilities collection is empty. Seeding mock data...");
+            const mockData = generateFacilitiesAround(lat, lng);
+            const batch = db.batch();
+            mockData.forEach(fac => {
+              const docRef = db.collection('facilities').doc(String(fac.id));
+              batch.set(docRef, fac);
+            });
+            return batch.commit();
+          }
+        }).then(() => {
+          facilitiesUnsubscribe = db.collection('facilities').onSnapshot(snapshot => {
+            const tempFacilities = [];
+            snapshot.forEach(doc => {
+              tempFacilities.push(doc.data());
+            });
+            // Sort to maintain correct indexing
+            tempFacilities.sort((a, b) => a.id - b.id);
+            facilities = tempFacilities;
+            filterAndRender();
+
+            if (selectedFacility) {
+              const updatedFac = facilities.find(f => f.id === selectedFacility.id);
+              if (updatedFac) {
+                selectedFacility = updatedFac;
+                renderTimeSlots();
+                updateSelectedSlotUI();
+              }
+            }
+          }, err => {
+            console.error("Firestore onSnapshot error:", err);
+          });
+        }).catch(err => {
+          console.error("Firestore seeding or syncing error:", err);
+        });
+      } else {
+        // Fallback Mode (LocalStorage / Memory)
+        const cached = localStorage.getItem('sportsN_facilities');
+        if (cached) {
+          facilities = JSON.parse(cached);
+        } else {
+          facilities = generateFacilitiesAround(lat, lng);
+          localStorage.setItem('sportsN_facilities', JSON.stringify(facilities));
+        }
+        filterAndRender();
+
+        if (selectedFacility) {
+          const updatedFac = facilities.find(f => f.id === selectedFacility.id);
+          if (updatedFac) {
+            selectedFacility = updatedFac;
+            renderTimeSlots();
+            updateSelectedSlotUI();
+          }
+        }
+      }
+    }
+
     function requestUserLocation() {
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
@@ -722,25 +835,22 @@
             map.setView(currentLatLng, 14);
             // Draw/Move user marker
             drawUserMarker();
-            // Re-generate facility data relative to user's real GPS position
-            facilities = generateFacilitiesAround(currentLatLng[0], currentLatLng[1]);
-            // Apply current filters
-            filterAndRender();
+            // Sync data
+            syncFacilitiesData(currentLatLng[0], currentLatLng[1]);
             showToast('GPS 현재 위치를 성공적으로 확인했습니다.');
           },
           (err) => {
             console.warn(`Geolocation error: ${err.message}. Using default coordinates.`);
             drawUserMarker();
-            // Default center data
-            facilities = generateFacilitiesAround(currentLatLng[0], currentLatLng[1]);
-            filterAndRender();
+            // Default center sync
+            syncFacilitiesData(currentLatLng[0], currentLatLng[1]);
           },
           { enableHighAccuracy: true, timeout: 5000 }
         );
       } else {
         // Fallback
-        facilities = generateFacilitiesAround(currentLatLng[0], currentLatLng[1]);
-        filterAndRender();
+        drawUserMarker();
+        syncFacilitiesData(currentLatLng[0], currentLatLng[1]);
       }
     }
 
@@ -912,22 +1022,86 @@
     let currentUser = null;
 
     function initAuth() {
-      // 1. Check local session
-      const userJSON = sessionStorage.getItem('sportsN_currentUser') || localStorage.getItem('sportsN_currentUser');
-      if (userJSON) {
-        currentUser = JSON.parse(userJSON);
+      if (isFirebaseEnabled) {
+        auth.onAuthStateChanged((user) => {
+          if (user) {
+            // Firestore에서 부가 정보(전화번호 등) 조회
+            db.collection('users').doc(user.uid).get().then(doc => {
+              let userData = {
+                uid: user.uid,
+                name: user.displayName || '사용자',
+                email: user.email,
+                phone: '010-0000-0000',
+                role: 'user'
+              };
+              if (doc.exists) {
+                userData = { ...userData, ...doc.data() };
+              }
+              currentUser = userData;
+              renderAuthStatus();
+              if (selectedFacility) updateBookingButtonState();
+            }).catch(err => {
+              console.error("Error fetching user doc:", err);
+              currentUser = {
+                uid: user.uid,
+                name: user.displayName || '사용자',
+                email: user.email,
+                phone: '010-0000-0000',
+                role: 'user'
+              };
+              renderAuthStatus();
+              if (selectedFacility) updateBookingButtonState();
+            });
+          } else {
+            currentUser = null;
+            renderAuthStatus();
+            if (selectedFacility) updateBookingButtonState();
+          }
+        });
+      } else {
+        // Fallback: LocalStorage Session
+        const userJSON = sessionStorage.getItem('sportsN_currentUser') || localStorage.getItem('sportsN_currentUser');
+        if (userJSON) {
+          currentUser = JSON.parse(userJSON);
+        }
+        renderAuthStatus();
       }
-      renderAuthStatus();
+    }
+
+    let isAdminMode = false;
+
+    function toggleAdminMode(checked) {
+      isAdminMode = checked;
+      showToast(isAdminMode ? '관리자 모드가 활성화되었습니다. 슬롯을 수동으로 잠글 수 있습니다.' : '관리자 모드가 비활성화되었습니다.', 'success');
+      
+      if (selectedFacility) {
+        renderTimeSlots();
+        updateSelectedSlotUI();
+      }
     }
 
     function renderAuthStatus() {
       const container = document.getElementById('auth-status');
       if (currentUser) {
+        const isAdmin = currentUser.role === 'admin';
+        const isAdminText = isAdmin ? '<span class="text-[9px] bg-red-500/20 text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded font-bold ml-1">ADMIN</span>' : '';
+        
+        let adminToggleHTML = '';
+        if (isAdmin) {
+          adminToggleHTML = `
+            <label class="flex items-center gap-1.5 cursor-pointer select-none bg-red-500/5 hover:bg-red-500/10 px-3 py-2 rounded-xl border border-red-500/20">
+              <input type="checkbox" id="admin-mode-toggle" ${isAdminMode ? 'checked' : ''} class="rounded accent-red-500 w-3.5 h-3.5" onchange="toggleAdminMode(this.checked)" />
+              <span class="text-[11px] text-red-400 font-semibold tracking-wider">어드민 모드</span>
+            </label>
+          `;
+        }
+
         container.innerHTML = `
           <div class="flex items-center gap-3">
+            ${adminToggleHTML}
             <button onclick="openMyBookingsModal()" class="btn-secondary glass-light text-xs font-semibold px-4 py-2 rounded-xl text-green-400 border border-green-500/20 hover:bg-green-500/10">내 예약</button>
             <div class="text-right hidden sm:block">
-              <p class="text-xs font-semibold text-white/80">👤 ${currentUser.name}님</p>
+              <p class="text-xs font-semibold text-white/80">👤 ${currentUser.name}님${isAdminText}</p>
               <p class="text-[10px] text-white/40">${currentUser.email}</p>
             </div>
             <button onclick="handleLogout()" class="text-xs font-bold text-white/40 hover:text-red-400 transition-colors">로그아웃</button>
@@ -971,10 +1145,11 @@
       }
     }
 
-    // Default mock user
+    // Default mock user database for Fallback Mode
     let defaultUsers = JSON.parse(localStorage.getItem('sportsN_users') || '[]');
     if (defaultUsers.length === 0) {
-      defaultUsers.push({ name: '홍길동', email: 'test@test.com', phone: '010-1234-5678', password: '123' });
+      defaultUsers.push({ name: '홍길동', email: 'test@test.com', phone: '010-1234-5678', password: '123', role: 'user' });
+      defaultUsers.push({ name: '관리자', email: 'admin@test.com', phone: '010-1111-2222', password: '123', role: 'admin' });
       localStorage.setItem('sportsN_users', JSON.stringify(defaultUsers));
     }
 
@@ -985,20 +1160,85 @@
       const phone = document.getElementById('reg-phone').value.trim();
       const pw = document.getElementById('reg-password').value;
 
-      // 1. Get users db
-      let users = JSON.parse(localStorage.getItem('sportsN_users') || '[]');
-      if (users.some(u => u.email === email)) {
-        showToast('이미 가입된 이메일 주소입니다.', 'error');
-        return;
+      // 관리자 회원가입 룰 지정 (이메일에 admin이 포함되어 있으면 관리자 권한 부여)
+      const role = email.toLowerCase().includes('admin') ? 'admin' : 'user';
+
+      if (isFirebaseEnabled) {
+        const regBtn = e.target.querySelector('button[type="submit"]');
+        const originalText = regBtn.innerText;
+        regBtn.disabled = true;
+        regBtn.innerText = '가입 진행 중...';
+
+        auth.createUserWithEmailAndPassword(email, pw)
+          .then((cred) => {
+            return cred.user.updateProfile({
+              displayName: name
+            }).then(() => {
+              return db.collection('users').doc(cred.user.uid).set({
+                name: name,
+                email: email,
+                phone: phone,
+                role: role
+              });
+            });
+          })
+          .then(() => {
+            showToast('회원가입이 완료되었습니다! 로그인해 주세요.');
+            switchAuthTab('login');
+            closeAuthModal();
+          })
+          .catch(err => {
+            console.error("Firebase register error:", err);
+            showToast(err.message, 'error');
+          })
+          .finally(() => {
+            regBtn.disabled = false;
+            regBtn.innerText = originalText;
+          });
+      } else {
+        // Fallback Mode
+        let users = JSON.parse(localStorage.getItem('sportsN_users') || '[]');
+        if (users.some(u => u.email === email)) {
+          showToast('이미 가입된 이메일 주소입니다.', 'error');
+          return;
+        }
+
+        const newUser = { name, email, phone, password: pw, role: role };
+        users.push(newUser);
+        localStorage.setItem('sportsN_users', JSON.stringify(users));
+
+        showToast('회원가입이 완료되었습니다! 로그인해 주세요.');
+        switchAuthTab('login');
       }
+    }
 
-      // 2. Save user
-      const newUser = { name, email, phone, password: pw };
-      users.push(newUser);
-      localStorage.setItem('sportsN_users', JSON.stringify(users));
-
-      showToast('회원가입이 완료되었습니다! 로그인해주세요.');
-      switchAuthTab('login');
+    // --- Google Login ---
+    async function handleGoogleLogin() {
+      if (isFirebaseEnabled) {
+        try {
+          const provider = new firebase.auth.GoogleAuthProvider();
+          const result = await auth.signInWithPopup(provider);
+          const user = result.user;
+          
+          // Check if this is a new user and add to Firestore if necessary
+          const userDoc = await db.collection("users").doc(user.uid).get();
+          if (!userDoc.exists) {
+            await db.collection("users").doc(user.uid).set({
+              name: user.displayName || 'Google User',
+              email: user.email,
+              phone: '010-0000-0000', // Default or prompt later
+              role: user.email.includes('admin') ? 'admin' : 'user',
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          }
+          alert(`환영합니다, ${user.displayName || user.email}님!`);
+          closeAuthModal();
+        } catch (error) {
+          alert("Google 로그인 실패: " + error.message);
+        }
+      } else {
+        alert("Google 로그인은 Firebase 환경(실제 서비스)에서만 지원됩니다.");
+      }
     }
 
     function handleLogin(e) {
@@ -1006,35 +1246,69 @@
       const email = document.getElementById('login-email').value.trim();
       const pw = document.getElementById('login-password').value;
 
-      const users = JSON.parse(localStorage.getItem('sportsN_users') || '[]');
-      const user = users.find(u => u.email === email && u.password === pw);
+      if (isFirebaseEnabled) {
+        const loginBtn = e.target.querySelector('button[type="submit"]');
+        const originalText = loginBtn.innerText;
+        loginBtn.disabled = true;
+        loginBtn.innerText = '로그인 중...';
 
-      if (!user) {
-        showToast('이메일 또는 비밀번호가 잘못되었습니다.', 'error');
-        return;
-      }
+        auth.signInWithEmailAndPassword(email, pw)
+          .then((cred) => {
+            closeAuthModal();
+            showToast(`${cred.user.displayName || '사용자'}님 환영합니다!`);
+          })
+          .catch(err => {
+            console.error("Firebase login error:", err);
+            showToast('이메일 또는 비밀번호가 잘못되었습니다.', 'error');
+          })
+          .finally(() => {
+            loginBtn.disabled = false;
+            loginBtn.innerText = originalText;
+          });
+      } else {
+        // Fallback Mode
+        const users = JSON.parse(localStorage.getItem('sportsN_users') || '[]');
+        const user = users.find(u => u.email === email && u.password === pw);
 
-      currentUser = user;
-      sessionStorage.setItem('sportsN_currentUser', JSON.stringify(user));
-      renderAuthStatus();
-      closeAuthModal();
-      showToast(`${user.name}님 환영합니다!`);
+        if (!user) {
+          showToast('이메일 또는 비밀번호가 잘못되었습니다.', 'error');
+          return;
+        }
 
-      // Trigger button updates if Detail modal is open
-      if (selectedFacility) {
-        updateBookingButtonState();
+        currentUser = user;
+        sessionStorage.setItem('sportsN_currentUser', JSON.stringify(user));
+        renderAuthStatus();
+        closeAuthModal();
+        showToast(`${user.name}님 환영합니다!`);
+
+        if (selectedFacility) {
+          updateBookingButtonState();
+        }
       }
     }
 
     function handleLogout() {
-      currentUser = null;
-      sessionStorage.removeItem('sportsN_currentUser');
-      localStorage.removeItem('sportsN_currentUser');
-      renderAuthStatus();
-      showToast('로그아웃 되었습니다.');
+      isAdminMode = false; // 어드민 모드 해제
+      if (isFirebaseEnabled) {
+        auth.signOut()
+          .then(() => {
+            showToast('로그아웃 되었습니다.');
+          })
+          .catch(err => {
+            console.error("Firebase logout error:", err);
+            showToast('로그아웃 실패: ' + err.message, 'error');
+          });
+      } else {
+        // Fallback Mode
+        currentUser = null;
+        sessionStorage.removeItem('sportsN_currentUser');
+        localStorage.removeItem('sportsN_currentUser');
+        renderAuthStatus();
+        showToast('로그아웃 되었습니다.');
 
-      if (selectedFacility) {
-        updateBookingButtonState();
+        if (selectedFacility) {
+          updateBookingButtonState();
+        }
       }
     }
 
@@ -1121,13 +1395,20 @@
           stateClass = 'border-yellow-500/25 bg-yellow-500/5 hover:border-yellow-500/60 hover:bg-yellow-500/10 text-white';
           badgeText = '🟡 1자리';
         } else if (s.state === 'full') {
-          stateClass = 'border-red-500/10 bg-red-500/2 text-white/20 line-through';
-          disabled = true;
-          badgeText = '🔴 마감';
+          if (isAdminMode) {
+            // 어드민 모드일 때는 빨간색이지만 잠금해제를 위해 활성화 상태 유지
+            stateClass = 'border-red-500/30 bg-red-500/5 hover:border-red-500/60 hover:bg-red-500/10 text-white';
+            badgeText = '🔴 잠금됨';
+            disabled = false;
+          } else {
+            stateClass = 'border-red-500/10 bg-red-500/2 text-white/20 line-through';
+            disabled = true;
+            badgeText = '🔴 마감';
+          }
         }
 
-        // Selected state styling override
-        if (selectedSlotIndex === idx) {
+        // Selected state styling override (유저 모드에서만 선택 표시)
+        if (!isAdminMode && selectedSlotIndex === idx) {
           stateClass = 'border-green-500 bg-green-500 text-black font-black shadow-lg';
           badgeText = '✓ 선택됨';
         }
@@ -1141,6 +1422,40 @@
         `;
 
         btn.addEventListener('click', () => {
+          if (isAdminMode) {
+            // 어드민 모드: 슬롯 상태 잠금/해제 토글
+            const currentSlotState = s.state;
+            const nextState = currentSlotState === 'full' ? 'available' : 'full';
+            
+            const updatedSlots = [...selectedFacility.timeSlots];
+            updatedSlots[selectedDateOffset][idx].state = nextState;
+            
+            if (isFirebaseEnabled) {
+              db.collection('facilities').doc(String(selectedFacility.id)).update({
+                timeSlots: updatedSlots
+              }).then(() => {
+                showToast(`슬롯 상태를 '${nextState === 'full' ? '잠금' : '해제'}' 처리했습니다.`);
+              }).catch(err => {
+                console.error("Firestore lock toggle error:", err);
+                showToast("잠금 설정 실패", "error");
+              });
+            } else {
+              // Fallback Mode
+              const facilitiesList = JSON.parse(localStorage.getItem('sportsN_facilities') || '[]');
+              const targetFac = facilitiesList.find(f => f.id === selectedFacility.id);
+              if (targetFac) {
+                targetFac.timeSlots[selectedDateOffset][idx].state = nextState;
+                localStorage.setItem('sportsN_facilities', JSON.stringify(facilitiesList));
+              }
+              facilities = facilitiesList;
+              selectedFacility = facilities.find(f => f.id === selectedFacility.id);
+              renderTimeSlots();
+              filterAndRender();
+              showToast(`슬롯 상태를 '${nextState === 'full' ? '잠금' : '해제'}' 처리했습니다.`);
+            }
+            return;
+          }
+
           if (selectedSlotIndex === idx) {
             selectedSlotIndex = null;
           } else {
@@ -1159,7 +1474,11 @@
       const payDisplay = document.getElementById('total-payment-display');
       const submitBtn = document.getElementById('submit-booking-btn');
 
-      if (selectedSlotIndex !== null) {
+      if (isAdminMode) {
+        display.innerText = '관리자 모드 (슬롯 클릭 시 잠금 토글)';
+        payDisplay.innerText = '';
+        submitBtn.disabled = true;
+      } else if (selectedSlotIndex !== null) {
         const slot = selectedFacility.timeSlots[selectedDateOffset][selectedSlotIndex];
         const dateText = getDateString(selectedDateOffset);
         
@@ -1177,7 +1496,9 @@
 
     function updateBookingButtonState() {
       const btn = document.getElementById('submit-booking-btn');
-      if (currentUser) {
+      if (isAdminMode) {
+        btn.innerText = '관리자 모드 (예약 불가)';
+      } else if (currentUser) {
         btn.innerText = '예약 및 결제 진행';
       } else {
         btn.innerText = '로그인 후 예약 가능';
@@ -1257,59 +1578,152 @@
     }
 
     function executeMockPayment() {
+      if (!selectedFacility || selectedSlotIndex === null) {
+        showToast('선택된 예약 정보가 없습니다.', 'error');
+        return;
+      }
+
       const payBtn = document.getElementById('pay-submit-btn');
+      const originalText = document.getElementById('payment-btn-text').innerText;
       payBtn.disabled = true;
       document.getElementById('payment-btn-text').innerHTML = `
         <div class="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin mr-2"></div>
-        PortOne 안전 결제 승인 중...
+        결제창 요청 중...
       `;
 
-      setTimeout(() => {
-        // Payment success logic
-        saveReservation();
-        
-        // Show success screen
-        closeBookingModal();
-        closeDetailModal();
-        openSuccessModal();
-      }, 1500);
+      // 1. PortOne SDK 초기화
+      IMP.init('imp37935403'); // 공용 테스트 가맹점 식별코드
+
+      // 2. PG사 매핑 설정
+      let pgProvider = 'html5_inicis'; // 기본값 (이니시스 카드)
+      if (activePaymentMethod === 'kakaopay') {
+        pgProvider = 'kakaopay.TC0ONETIME'; // 카카오페이 테스트
+      } else if (activePaymentMethod === 'naverpay') {
+        pgProvider = 'naverpay.partner-naverpay';
+      } else if (activePaymentMethod === 'tosspay') {
+        pgProvider = 'tosspay.tosspay';
+      }
+
+      const slot = selectedFacility.timeSlots[selectedDateOffset][selectedSlotIndex];
+      const fullDate = getFormattedFullDate(selectedDateOffset);
+      const bookingId = `RES-${Math.floor(1000 + Math.random()*9000)}-${Math.floor(1000 + Math.random()*9000)}`;
+
+      const payParams = {
+        pg: pgProvider,
+        pay_method: 'card',
+        merchant_uid: 'merchant_' + new Date().getTime(),
+        name: `${selectedFacility.name} (${slot.time.split(' - ')[0]})`,
+        amount: selectedFacility.price,
+        buyer_email: currentUser.email,
+        buyer_name: currentUser.name,
+        buyer_tel: currentUser.phone
+      };
+
+      IMP.request_pay(payParams, function (rsp) {
+        if (rsp.success) {
+          showToast('결제가 성공적으로 완료되었습니다.');
+          
+          // 예약 내역 저장 및 슬롯 갱신
+          saveReservation(bookingId, function() {
+            closeBookingModal();
+            closeDetailModal();
+            openSuccessModalWithId(bookingId);
+          });
+        } else {
+          showToast('결제에 실패하였습니다: ' + rsp.error_msg, 'error');
+          payBtn.disabled = false;
+          document.getElementById('payment-btn-text').innerText = originalText;
+        }
+      });
     }
 
-    function saveReservation() {
-      const reservations = JSON.parse(localStorage.getItem('sportsN_reservations') || '[]');
+    function saveReservation(bookingId, callback) {
       const slot = selectedFacility.timeSlots[selectedDateOffset][selectedSlotIndex];
+      const dateTimeText = `${getFormattedFullDate(selectedDateOffset)} ${slot.time}`;
       
       const newBooking = {
-        bookingId: `RES-${Math.floor(1000 + Math.random()*9000)}-${Math.floor(1000 + Math.random()*9000)}`,
+        bookingId: bookingId,
         userEmail: currentUser.email,
         facilityId: selectedFacility.id,
         facilityName: selectedFacility.name,
         facilityEmoji: selectedFacility.emoji,
         sportLabel: selectedFacility.sportLabel,
-        dateTimeText: `${getFormattedFullDate(selectedDateOffset)} ${slot.time}`,
+        dateTimeText: dateTimeText,
         price: selectedFacility.price,
         createdDate: new Date().toISOString(),
-        paymentMethod: activePaymentMethod
+        paymentMethod: activePaymentMethod,
+        dateOffset: selectedDateOffset,
+        slotIndex: selectedSlotIndex
       };
 
-      reservations.push(newBooking);
-      localStorage.setItem('sportsN_reservations', JSON.stringify(reservations));
-      
-      // Update original mock database states so they display as reserved/closed dynamically!
-      slot.state = 'full'; 
+      if (isFirebaseEnabled) {
+        // 1. 예약 기록 저장
+        db.collection('reservations').doc(bookingId).set(newBooking)
+          .then(() => {
+            // 2. 해당 시설의 타임슬롯 상태를 'full'로 업데이트
+            const updatedSlots = [...selectedFacility.timeSlots];
+            updatedSlots[selectedDateOffset][selectedSlotIndex].state = 'full';
+            
+            return db.collection('facilities').doc(String(selectedFacility.id)).update({
+              timeSlots: updatedSlots
+            });
+          })
+          .then(() => {
+            if (callback) callback();
+          })
+          .catch(err => {
+            console.error("Firestore reservation error:", err);
+            showToast("데이터 저장 실패: " + err.message, "error");
+          });
+      } else {
+        // Fallback Mode
+        const reservations = JSON.parse(localStorage.getItem('sportsN_reservations') || '[]');
+        reservations.push(newBooking);
+        localStorage.setItem('sportsN_reservations', JSON.stringify(reservations));
+        
+        // 로컬 시설 데이터 갱신
+        slot.state = 'full';
+        const facilitiesList = JSON.parse(localStorage.getItem('sportsN_facilities') || '[]');
+        const targetFac = facilitiesList.find(f => f.id === selectedFacility.id);
+        if (targetFac) {
+          targetFac.timeSlots[selectedDateOffset][selectedSlotIndex].state = 'full';
+          localStorage.setItem('sportsN_facilities', JSON.stringify(facilitiesList));
+        }
+
+        // 메모리 업데이트 및 리프레시
+        filterAndRender();
+
+        if (callback) callback();
+      }
     }
 
     // Success Modal
-    function openSuccessModal() {
+    function openSuccessModalWithId(bookingId) {
       const modal = document.getElementById('success-modal');
       modal.classList.remove('opacity-0', 'pointer-events-none');
 
-      const reservations = JSON.parse(localStorage.getItem('sportsN_reservations') || '[]');
-      const lastBooking = reservations[reservations.length - 1];
+      if (isFirebaseEnabled) {
+        db.collection('reservations').doc(bookingId).get().then(doc => {
+          if (doc.exists) {
+            const data = doc.data();
+            document.getElementById('success-facility-name').innerText = data.facilityName;
+            document.getElementById('success-date-time').innerText = data.dateTimeText;
+            document.getElementById('success-booking-id').innerText = data.bookingId;
+          }
+        });
+      } else {
+        const reservations = JSON.parse(localStorage.getItem('sportsN_reservations') || '[]');
+        const booking = reservations.find(r => r.bookingId === bookingId) || reservations[reservations.length - 1];
+        if (booking) {
+          document.getElementById('success-facility-name').innerText = booking.facilityName;
+          document.getElementById('success-date-time').innerText = booking.dateTimeText;
+          document.getElementById('success-booking-id').innerText = booking.bookingId;
+        }
+      }
+    }
 
-      document.getElementById('success-facility-name').innerText = lastBooking.facilityName;
-      document.getElementById('success-date-time').innerText = lastBooking.dateTimeText;
-      document.getElementById('success-booking-id').innerText = lastBooking.bookingId;
+    function openSuccessModal() {
+      openSuccessModalWithId('');
     }
 
     function closeSuccessModal() {
@@ -1331,85 +1745,218 @@
       modal.classList.add('opacity-0', 'pointer-events-none');
     }
 
+    function calculateRefundAmount(booking) {
+      try {
+        // dateTimeText 예시: "2026-07-16 18:00 - 19:00"
+        const parts = booking.dateTimeText.split(' ');
+        const dateStr = parts[0]; // "2026-07-16"
+        const startTimeStr = parts[1]; // "18:00"
+        
+        const bookingTime = new Date(`${dateStr}T${startTimeStr}:00`);
+        const now = new Date();
+        
+        const diffMs = bookingTime - now;
+        const diffHours = diffMs / (1000 * 60 * 60);
+
+        if (diffHours >= 24) {
+          // 24시간 전: 100% 환불
+          return { percent: 100, amount: booking.price, penalty: 0, hoursLeft: diffHours };
+        } else if (diffHours >= 12) {
+          // 12~24시간 전: 50% 환불
+          const amt = Math.floor(booking.price * 0.5);
+          return { percent: 50, amount: amt, penalty: booking.price - amt, hoursLeft: diffHours };
+        } else {
+          // 12시간 미만: 환불 불가
+          return { percent: 0, amount: 0, penalty: booking.price, hoursLeft: diffHours };
+        }
+      } catch (err) {
+        console.error("Error calculating refund:", err);
+        return { percent: 0, amount: 0, penalty: booking.price, hoursLeft: 0 };
+      }
+    }
+
     function renderMyBookings() {
       const container = document.getElementById('my-bookings-list');
       container.innerHTML = '';
 
       if (!currentUser) return;
 
-      const reservations = JSON.parse(localStorage.getItem('sportsN_reservations') || '[]');
-      const userBookings = reservations.filter(r => r.userEmail === currentUser.email);
-
-      if (userBookings.length === 0) {
-        container.innerHTML = `
-          <div class="text-center py-10 text-white/30">
-            <p class="text-2xl">📅</p>
-            <p class="text-xs mt-2">최근 결제하거나 완료한 예약이 없습니다.</p>
-          </div>
-        `;
-        return;
-      }
-
-      // Sort newest first
-      userBookings.sort((a,b) => new Date(b.createdDate) - new Date(a.createdDate));
-
-      userBookings.forEach(booking => {
-        const item = document.createElement('div');
-        item.className = 'glass-light border border-white/5 rounded-2xl p-4 space-y-3';
-        
-        item.innerHTML = `
-          <div class="flex justify-between items-start">
-            <div>
-              <span class="text-[10px] px-2 py-0.5 rounded-full font-bold glass-light">${booking.facilityEmoji} ${booking.sportLabel}</span>
-              <h3 class="font-bold text-sm text-white mt-1">${booking.facilityName}</h3>
+      const displayBookings = (userBookings) => {
+        if (userBookings.length === 0) {
+          container.innerHTML = `
+            <div class="text-center py-10 text-white/30">
+              <p class="text-2xl">📅</p>
+              <p class="text-xs mt-2">최근 결제하거나 완료한 예약이 없습니다.</p>
             </div>
-            <span class="text-[10px] text-green-400 border border-green-500/25 bg-green-500/5 px-2.5 py-1 rounded-lg font-bold">확정 완료</span>
-          </div>
+          `;
+          return;
+        }
+
+        // Sort newest first
+        userBookings.sort((a, b) => new Date(b.createdDate) - new Date(a.createdDate));
+
+        userBookings.forEach(booking => {
+          const item = document.createElement('div');
+          item.className = 'glass-light border border-white/5 rounded-2xl p-4 space-y-3';
           
-          <div class="space-y-1.5 text-xs text-white/60">
-            <p class="flex items-center gap-1.5">📅 ${booking.dateTimeText}</p>
-            <p class="flex items-center gap-1.5">💳 ₩${booking.price.toLocaleString()} (${booking.paymentMethod.toUpperCase()})</p>
-            <p class="text-[10px] text-white/30">번호: ${booking.bookingId}</p>
-          </div>
+          // 실시간 위약금 계산
+          const refundDetails = calculateRefundAmount(booking);
+          let badgeColor = 'text-green-400 border-green-500/25 bg-green-500/5';
+          let cancelBtnText = `예약 취소 (100% 무료 환불)`;
           
-          <div class="flex gap-2 border-t border-white/5 pt-3">
-            <button onclick="cancelBooking('${booking.bookingId}')" class="flex-1 py-2 text-xs font-bold bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 rounded-xl transition-all">
-              예약 취소 (100% 환불)
-            </button>
-          </div>
-        `;
-        
-        container.appendChild(item);
-      });
+          if (refundDetails.percent === 50) {
+            badgeColor = 'text-yellow-400 border-yellow-500/25 bg-yellow-500/5';
+            cancelBtnText = `예약 취소 (위약금 50% 발생)`;
+          } else if (refundDetails.percent === 0) {
+            badgeColor = 'text-red-400 border-red-500/25 bg-red-500/5';
+            cancelBtnText = `취소 불가 (위약금 100% 발생)`;
+          }
+
+          item.innerHTML = `
+            <div class="flex justify-between items-start">
+              <div>
+                <span class="text-[10px] px-2 py-0.5 rounded-full font-bold glass-light">${booking.facilityEmoji || '🏟️'} ${booking.sportLabel}</span>
+                <h3 class="font-bold text-sm text-white mt-1">${booking.facilityName}</h3>
+              </div>
+              <span class="text-[10px] ${badgeColor} border px-2.5 py-1 rounded-lg font-bold">확정 완료</span>
+            </div>
+            
+            <div class="space-y-1.5 text-xs text-white/60">
+              <p class="flex items-center gap-1.5">📅 ${booking.dateTimeText}</p>
+              <p class="flex items-center gap-1.5">💳 ₩${booking.price.toLocaleString()} (${booking.paymentMethod.toUpperCase()})</p>
+              <p class="text-[10px] text-white/30">번호: ${booking.bookingId}</p>
+            </div>
+            
+            <div class="flex gap-2 border-t border-white/5 pt-3">
+              <button onclick="cancelBooking('${booking.bookingId}')" ${refundDetails.percent === 0 ? 'disabled' : ''} class="flex-1 py-2 text-xs font-bold bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 rounded-xl transition-all disabled:opacity-30 disabled:pointer-events-none">
+                ${cancelBtnText}
+              </button>
+            </div>
+          `;
+          
+          container.appendChild(item);
+        });
+      };
+
+      if (isFirebaseEnabled) {
+        db.collection('reservations').where('userEmail', '==', currentUser.email).get()
+          .then(snapshot => {
+            const list = [];
+            snapshot.forEach(doc => {
+              list.push(doc.data());
+            });
+            displayBookings(list);
+          })
+          .catch(err => {
+            console.error("Firestore fetch reservations error:", err);
+            showToast("예약 내역 로드 실패", "error");
+          });
+      } else {
+        // Fallback
+        const reservations = JSON.parse(localStorage.getItem('sportsN_reservations') || '[]');
+        const userBookings = reservations.filter(r => r.userEmail === currentUser.email);
+        displayBookings(userBookings);
+      }
     }
 
     function cancelBooking(bookingId) {
-      if (confirm('이 예약을 정말 취소하시겠습니까? (24시간 전 규정에 따라 100% 자동 환불됩니다)')) {
-        let reservations = JSON.parse(localStorage.getItem('sportsN_reservations') || '[]');
-        
-        // Find deleted slot coordinates to release back to database
-        const booking = reservations.find(r => r.bookingId === bookingId);
-        if (booking) {
-          // Release timeSlot state back to available
-          const fac = facilities.find(f => f.id === booking.facilityId);
-          if (fac) {
-            // Find slot index matched
-            const matchedDate = fac.timeSlots.find((day, offset) => {
-              const matchedSlot = day.find(s => booking.dateTimeText.includes(s.time));
-              if (matchedSlot) {
-                matchedSlot.state = 'available';
-                return true;
-              }
-              return false;
-            });
-          }
+      const executeCancel = (booking) => {
+        const refundDetails = calculateRefundAmount(booking);
+        if (refundDetails.percent === 0) {
+          showToast('이용 12시간 미만 건은 취소 및 환불이 불가능합니다.', 'error');
+          return;
         }
 
-        reservations = reservations.filter(r => r.bookingId !== bookingId);
-        localStorage.setItem('sportsN_reservations', JSON.stringify(reservations));
-        showToast('예약 및 결제 취소가 완료되었습니다. (환불 완료)');
-        renderMyBookings();
-        filterAndRender();
+        const confirmMessage = `이 예약을 정말 취소하시겠습니까?\n\n` +
+                               `• 이용 예정 시간까지 약 ${Math.max(0, Math.floor(refundDetails.hoursLeft))}시간 남음\n` +
+                               `• 환불률: ${refundDetails.percent}%\n` +
+                               `• 최종 환불 금액: ₩${refundDetails.amount.toLocaleString()}\n` +
+                               `• 위약금 발생: ₩${refundDetails.penalty.toLocaleString()}\n\n` +
+                               `취소 완료 후 결제 수단으로 환불 처리됩니다. 진행하시겠습니까?`;
+
+        if (confirm(confirmMessage)) {
+          if (isFirebaseEnabled) {
+            // 1. Firebase에서 예약 삭제
+            db.collection('reservations').doc(bookingId).delete()
+              .then(() => {
+                // 2. 해당 시설의 타임슬롯 상태 복구
+                return db.collection('facilities').doc(String(booking.facilityId)).get();
+              })
+              .then(doc => {
+                if (doc.exists) {
+                  const facData = doc.data();
+                  const updatedSlots = [...facData.timeSlots];
+                  
+                  const dateOffset = booking.dateOffset;
+                  const slotIndex = booking.slotIndex;
+                  
+                  if (updatedSlots[dateOffset] && updatedSlots[dateOffset][slotIndex]) {
+                    updatedSlots[dateOffset][slotIndex].state = 'available';
+                  }
+
+                  return db.collection('facilities').doc(String(booking.facilityId)).update({
+                    timeSlots: updatedSlots
+                  });
+                }
+              })
+              .then(() => {
+                showToast('예약 및 결제 취소가 완료되었습니다. (환불 완료)');
+                renderMyBookings();
+              })
+              .catch(err => {
+                console.error("Firestore cancellation error:", err);
+                showToast("취소 실패: " + err.message, "error");
+              });
+          } else {
+            // Fallback Mode
+            let reservations = JSON.parse(localStorage.getItem('sportsN_reservations') || '[]');
+            const idx = reservations.findIndex(r => r.bookingId === bookingId);
+            if (idx !== -1) {
+              const b = reservations[idx];
+              reservations.splice(idx, 1);
+              localStorage.setItem('sportsN_reservations', JSON.stringify(reservations));
+              
+              // 로컬 DB 슬롯 복구
+              const facilitiesList = JSON.parse(localStorage.getItem('sportsN_facilities') || '[]');
+              const targetFac = facilitiesList.find(f => f.id === b.facilityId);
+              if (targetFac) {
+                if (targetFac.timeSlots[b.dateOffset] && targetFac.timeSlots[b.dateOffset][b.slotIndex]) {
+                  targetFac.timeSlots[b.dateOffset][b.slotIndex].state = 'available';
+                }
+                localStorage.setItem('sportsN_facilities', JSON.stringify(facilitiesList));
+              }
+
+              // 메모리 업데이트
+              filterAndRender();
+              showToast('예약 및 결제 취소가 완료되었습니다. (환불 완료)');
+              renderMyBookings();
+            }
+          }
+        }
+      };
+
+      // 먼저 예약 정보 조회
+      if (isFirebaseEnabled) {
+        db.collection('reservations').doc(bookingId).get()
+          .then(doc => {
+            if (doc.exists) {
+              executeCancel(doc.data());
+            } else {
+              showToast('예약 정보를 찾을 수 없습니다.', 'error');
+            }
+          })
+          .catch(err => {
+            console.error("Fetch booking error:", err);
+            showToast("오류 발생", "error");
+          });
+      } else {
+        const reservations = JSON.parse(localStorage.getItem('sportsN_reservations') || '[]');
+        const booking = reservations.find(r => r.bookingId === bookingId);
+        if (booking) {
+          executeCancel(booking);
+        } else {
+          showToast('예약 정보를 찾을 수 없습니다.', 'error');
+        }
       }
     }
 
@@ -1502,6 +2049,7 @@
 
     // ── Initialization Entrypoint ──
     window.addEventListener('DOMContentLoaded', () => {
+      initFirebase();
       initAuth();
       initMap();
       parseQueryParameters();

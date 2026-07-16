@@ -1,0 +1,43 @@
+{
+  "name": "sportsn",
+  "version": "1.0.0",
+  "description": "",
+  "main": "firebase_config.js",
+  "scripts": {
+    "generate:firebase-config": "node scripts/generate-firebase-config.js",
+    "predev": "npm run generate:firebase-config",
+    "dev": "vite",
+    "prebuild": "npm run generate:firebase-config",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tense2026/sportsN.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/tense2026/sportsN/issues"
+  },
+  "homepage": "https://github.com/tense2026/sportsN#readme",
+  "dependencies": {
+    "@vitejs/plugin-react": "^6.0.3",
+    "firebase": "^12.16.0",
+    "leaflet": "^1.9.4",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-hot-toast": "^2.6.0",
+    "react-icons": "^5.7.0",
+    "react-leaflet": "^5.0.0",
+    "react-router-dom": "^7.18.1",
+    "vite": "^8.1.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.2",
+    "tailwindcss": "^4.3.2"
+  }
+}
