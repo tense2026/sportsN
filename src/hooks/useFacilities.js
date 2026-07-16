@@ -8,7 +8,7 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import { db, isFirebaseEnabled } from '../config/firebase';
-import { generateFacilitiesAround } from '../data/mockFacilities';
+import { getGyeongsanDemoFacilities } from '../data/mockFacilities';
 
 const STORAGE_KEY = 'sportsN_facilities';
 
@@ -16,18 +16,20 @@ export function useFacilities(userLat, userLng) {
   const [facilities, setFacilities] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const seedMockData = useCallback(async (lat, lng) => {
-    const mockData = generateFacilitiesAround(lat, lng);
+  const upsertGyeongsanDemos = useCallback(async (existing = []) => {
+    const mockData = getGyeongsanDemoFacilities();
+    const demoIds = new Set(mockData.map((fac) => fac.id));
+    const merged = [...mockData, ...existing.filter((fac) => !demoIds.has(fac.id))];
+
     if (isFirebaseEnabled) {
       const batch = writeBatch(db);
       mockData.forEach((fac) => {
-        const docRef = doc(db, 'facilities', String(fac.id));
-        batch.set(docRef, fac);
+        batch.set(doc(db, 'facilities', String(fac.id)), fac, { merge: true });
       });
       await batch.commit();
     } else {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(mockData));
-      setFacilities(mockData);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      setFacilities(merged);
     }
   }, []);
 
@@ -37,9 +39,8 @@ export function useFacilities(userLat, userLng) {
     if (isFirebaseEnabled) {
       const init = async () => {
         const snapshot = await getDocs(collection(db, 'facilities'));
-        if (snapshot.empty) {
-          await seedMockData(userLat, userLng);
-        }
+        const existing = snapshot.docs.map((d) => d.data());
+        await upsertGyeongsanDemos(existing);
       };
       init();
 
@@ -60,15 +61,10 @@ export function useFacilities(userLat, userLng) {
     }
 
     const cached = localStorage.getItem(STORAGE_KEY);
-    if (cached) {
-      setFacilities(JSON.parse(cached));
-    } else {
-      const mockData = generateFacilitiesAround(userLat, userLng);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(mockData));
-      setFacilities(mockData);
-    }
+    const existing = cached ? JSON.parse(cached) : [];
+    upsertGyeongsanDemos(existing);
     setLoading(false);
-  }, [userLat, userLng, seedMockData]);
+  }, [userLat, userLng, upsertGyeongsanDemos]);
 
   const updateFacilitySlots = useCallback(async (facilityId, timeSlots) => {
     if (isFirebaseEnabled) {

@@ -31,3 +31,4 @@ sketch
 .env
 firebase_config.js
 dist/
+.vercel

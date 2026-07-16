@@ -5,6 +5,28 @@ const SPORT_IMAGES = {
   basketball: 'https://images.unsplash.com/photo-1546519638-68e109498ffc?w=200&h=200&fit=crop',
 };
 
+export const GYEONGSAN_CENTER = { lat: 35.8253, lng: 128.7411 };
+
+function generateTimeSlots(seed) {
+  const timeSlots = [];
+  for (let d = 0; d < 3; d++) {
+    const daySlots = [];
+    for (let h = 8; h < 22; h++) {
+      const r = (seed + d + h) % 10;
+      let state = 'available';
+      if (r < 2) state = 'full';
+      else if (r < 4) state = 'few';
+
+      daySlots.push({
+        time: `${String(h).padStart(2, '0')}:00 - ${String(h + 1).padStart(2, '0')}:00`,
+        state,
+      });
+    }
+    timeSlots.push(daySlots);
+  }
+  return timeSlots;
+}
+
 function generateReviews(facilityId, count) {
   const authors = ['김민수', '이지현', '박준호', '최서연', '정우진', '한소희'];
   const comments = [
@@ -23,6 +45,123 @@ function generateReviews(facilityId, count) {
     date: `2026-0${((i % 6) + 1)}-${String(10 + i).padStart(2, '0')}`,
     comment: comments[(facilityId + i) % comments.length],
   }));
+}
+
+function buildFacility({
+  id,
+  name,
+  sport,
+  emoji,
+  sportLabel,
+  lat,
+  lng,
+  address,
+  price,
+  phone,
+  description,
+  amenities,
+  reviewCount,
+}) {
+  return {
+    id,
+    name,
+    sport,
+    emoji,
+    sportLabel,
+    image: SPORT_IMAGES[sport],
+    lat,
+    lng,
+    address,
+    rating: (4.0 + (id % 11) * 0.1).toFixed(1),
+    reviewCount,
+    reviews: generateReviews(id, reviewCount),
+    price,
+    amenities,
+    timeSlots: generateTimeSlots(id),
+    description,
+    phone,
+    operatingHours: '08:00 - 22:00',
+  };
+}
+
+export function getGyeongsanDemoFacilities() {
+  return [
+    buildFacility({
+      id: 1,
+      name: '경산역 풋살파크',
+      sport: 'futsal',
+      emoji: '⚽',
+      sportLabel: '풋살',
+      lat: 35.8272,
+      lng: 128.7388,
+      address: '경상북도 경산시 중앙로 68',
+      price: 28000,
+      phone: '053-942-1100',
+      description: '경산역 도보 5분 거리의 실내 풋살장입니다. 인조잔디 코트와 샤워실을 갖추고 있습니다.',
+      amenities: ['🚿 샤워실', '🅿️ 주차장', '💡 야간조명', '❄️ 냉난방'],
+      reviewCount: 87,
+    }),
+    buildFacility({
+      id: 2,
+      name: '경산시민체육관',
+      sport: 'tennis',
+      emoji: '🎾',
+      sportLabel: '테니스',
+      lat: 35.8196,
+      lng: 128.7458,
+      address: '경상북도 경산시 조빈동 512-1',
+      price: 20000,
+      phone: '053-811-2300',
+      description: '경산시 대표 공공체육시설로 실내·실외 테니스 코트를 이용할 수 있습니다.',
+      amenities: ['🚿 샤워실', '🅿️ 주차장', '👟 장비대여', '💡 야간조명'],
+      reviewCount: 124,
+    }),
+    buildFacility({
+      id: 3,
+      name: '조와 배드민턴센터',
+      sport: 'badminton',
+      emoji: '🏸',
+      sportLabel: '배드민턴',
+      lat: 35.8345,
+      lng: 128.755,
+      address: '경상북도 경산시 조와동 145-3',
+      price: 14000,
+      phone: '053-964-5500',
+      description: '조와동 주민센터 인근 배드민턴 전용 실내 체육관입니다.',
+      amenities: ['🚿 샤워실', '🅿️ 주차장', '❄️ 냉난방', '🥤 음료판매'],
+      reviewCount: 56,
+    }),
+    buildFacility({
+      id: 4,
+      name: '중방 농구체육관',
+      sport: 'basketball',
+      emoji: '🏀',
+      sportLabel: '농구',
+      lat: 35.8178,
+      lng: 128.7285,
+      address: '경상북도 경산시 중방동 88-12',
+      price: 18000,
+      phone: '053-977-3300',
+      description: '중방동 생활체육관 내 실내 농구 코트로 동호회 연습과 대관에 적합합니다.',
+      amenities: ['🚿 샤워실', '🅿️ 주차장', '💡 야간조명', '👟 장비대여'],
+      reviewCount: 42,
+    }),
+    buildFacility({
+      id: 5,
+      name: '삼성현 테니스클럽',
+      sport: 'tennis',
+      emoji: '🎾',
+      sportLabel: '테니스',
+      lat: 35.8125,
+      lng: 128.7489,
+      address: '경상북도 경산시 삼성현로 12',
+      price: 22000,
+      phone: '053-951-7700',
+      description: '삼성현동 인근 프리미엄 실내 테니스 클럽으로 레슨 프로그램도 운영합니다.',
+      amenities: ['🚿 샤워실', '🅿️ 주차장', '👟 장비대여', '❄️ 냉난방', '🥤 음료판매'],
+      reviewCount: 68,
+    }),
+  ];
 }
 
 export function generateFacilitiesAround(lat, lng) {
@@ -70,46 +209,26 @@ export function generateFacilitiesAround(lat, lng) {
       else if (sportObj.type === 'basketball') price = 20000;
       price += (globalIndex % 3) * 3000;
 
-      const timeSlots = [];
-      for (let d = 0; d < 3; d++) {
-        const daySlots = [];
-        for (let h = 8; h < 22; h++) {
-          const r = (globalIndex + d + h) % 10;
-          let state = 'available';
-          if (r < 2) state = 'full';
-          else if (r < 4) state = 'few';
-
-          daySlots.push({
-            time: `${String(h).padStart(2, '0')}:00 - ${String(h + 1).padStart(2, '0')}:00`,
-            state,
-          });
-        }
-        timeSlots.push(daySlots);
-      }
-
       const amenities = amenitiesList.filter((_, idx) => (globalIndex + idx) % 2 === 0);
       const reviewCount = 30 + ((globalIndex * 7) % 150);
 
-      facilitiesTemp.push({
-        id: globalIndex++,
-        name,
-        sport: sportObj.type,
-        emoji: sportObj.emoji,
-        sportLabel: sportObj.label,
-        image: SPORT_IMAGES[sportObj.type],
-        lat: fLat,
-        lng: fLng,
-        address: `서울시 특별구 스포츠로 ${globalIndex * 14}길`,
-        rating: (4.0 + (globalIndex % 11) * 0.1).toFixed(1),
-        reviewCount,
-        reviews: generateReviews(globalIndex, reviewCount),
-        price,
-        amenities,
-        timeSlots,
-        description: `${name}은 최고의 품질과 쾌적한 운동 환경을 제공합니다.`,
-        phone: `02-1234-${String(globalIndex * 99).padStart(4, '0')}`,
-        operatingHours: '08:00 - 22:00',
-      });
+      facilitiesTemp.push(
+        buildFacility({
+          id: globalIndex++,
+          name,
+          sport: sportObj.type,
+          emoji: sportObj.emoji,
+          sportLabel: sportObj.label,
+          lat: fLat,
+          lng: fLng,
+          address: `서울시 특별구 스포츠로 ${globalIndex * 14}길`,
+          price,
+          phone: `02-1234-${String(globalIndex * 99).padStart(4, '0')}`,
+          description: `${name}은 최고의 품질과 쾌적한 운동 환경을 제공합니다.`,
+          amenities,
+          reviewCount,
+        })
+      );
     });
   });
 

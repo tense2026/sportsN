@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 
-const DEFAULT_LOCATION = { lat: 37.4979, lng: 127.0276 };
+import { GYEONGSAN_CENTER } from '../data/mockFacilities';
+
+const DEFAULT_LOCATION = GYEONGSAN_CENTER;
 
 export function useGeolocation() {
   const [location, setLocation] = useState(DEFAULT_LOCATION);
