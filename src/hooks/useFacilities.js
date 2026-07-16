@@ -12,21 +12,31 @@ import { getGyeongsanDemoFacilities } from '../data/mockFacilities';
 
 const STORAGE_KEY = 'sportsN_facilities';
 
+function mergeWithDemoFacilities(existing = []) {
+  const mockData = getGyeongsanDemoFacilities();
+  const demoIds = new Set(mockData.map((fac) => fac.id));
+  return [...mockData, ...existing.filter((fac) => !demoIds.has(fac.id))];
+}
+
 export function useFacilities(userLat, userLng) {
   const [facilities, setFacilities] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const upsertGyeongsanDemos = useCallback(async (existing = []) => {
     const mockData = getGyeongsanDemoFacilities();
-    const demoIds = new Set(mockData.map((fac) => fac.id));
-    const merged = [...mockData, ...existing.filter((fac) => !demoIds.has(fac.id))];
+    const merged = mergeWithDemoFacilities(existing);
 
     if (isFirebaseEnabled) {
-      const batch = writeBatch(db);
-      mockData.forEach((fac) => {
-        batch.set(doc(db, 'facilities', String(fac.id)), fac, { merge: true });
-      });
-      await batch.commit();
+      try {
+        const batch = writeBatch(db);
+        mockData.forEach((fac) => {
+          batch.set(doc(db, 'facilities', String(fac.id)), fac);
+        });
+        await batch.commit();
+      } catch (err) {
+        console.error('Failed to upsert demo facilities:', err);
+      }
+      setFacilities(merged);
     } else {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
       setFacilities(merged);
@@ -47,8 +57,8 @@ export function useFacilities(userLat, userLng) {
       const unsubscribe = onSnapshot(
         collection(db, 'facilities'),
         (snapshot) => {
-          const data = snapshot.docs.map((d) => d.data()).sort((a, b) => a.id - b.id);
-          setFacilities(data);
+          const data = snapshot.docs.map((d) => d.data());
+          setFacilities(mergeWithDemoFacilities(data));
           setLoading(false);
         },
         (err) => {

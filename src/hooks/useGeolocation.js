@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 import { GYEONGSAN_CENTER } from '../data/mockFacilities';
 
@@ -6,7 +6,7 @@ const DEFAULT_LOCATION = GYEONGSAN_CENTER;
 
 export function useGeolocation() {
   const [location, setLocation] = useState(DEFAULT_LOCATION);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const requestLocation = () => {
@@ -32,10 +32,6 @@ export function useGeolocation() {
       { enableHighAccuracy: true, timeout: 5000 }
     );
   };
-
-  useEffect(() => {
-    requestLocation();
-  }, []);
 
   const setManualLocation = (lat, lng) => {
     setLocation({ lat, lng });

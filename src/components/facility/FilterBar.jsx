@@ -27,21 +27,21 @@ export default function FilterBar({ filters, onFilterChange }) {
         <select
           value={filters.radius}
           onChange={(e) => onFilterChange({ radius: parseInt(e.target.value) })}
-          className="glass-light border border-white/5 rounded-xl px-3 py-2 text-xs text-white/80 outline-none flex-1"
+          className="bg-dark-800 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none flex-1 cursor-pointer"
         >
-          <option value={5000}>반경 5km 이내</option>
-          <option value={1000}>반경 1km 이내</option>
-          <option value={3000}>반경 3km 이내</option>
-          <option value={10000}>반경 10km 이내</option>
+          <option value={5000} className="bg-dark-800 text-white">반경 5km 이내</option>
+          <option value={1000} className="bg-dark-800 text-white">반경 1km 이내</option>
+          <option value={3000} className="bg-dark-800 text-white">반경 3km 이내</option>
+          <option value={10000} className="bg-dark-800 text-white">반경 10km 이내</option>
         </select>
         <select
           value={filters.sortBy}
           onChange={(e) => onFilterChange({ sortBy: e.target.value })}
-          className="glass-light border border-white/5 rounded-xl px-3 py-2 text-xs text-white/80 outline-none flex-1"
+          className="bg-dark-800 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none flex-1 cursor-pointer"
         >
-          <option value="distance">거리 가까운순</option>
-          <option value="rating">평점 높은순</option>
-          <option value="price">가격 낮은순</option>
+          <option value="distance" className="bg-dark-800 text-white">거리 가까운순</option>
+          <option value="rating" className="bg-dark-800 text-white">평점 높은순</option>
+          <option value="price" className="bg-dark-800 text-white">가격 낮은순</option>
         </select>
       </div>
 

@@ -36,6 +36,15 @@ body {
   margin: 0;
 }
 
+select {
+  color-scheme: dark;
+}
+
+select option {
+  background-color: #0d1a24;
+  color: #ffffff;
+}
+
 /* Dark Leaflet Map */
 .leaflet-container {
   background: #080f14 !important;
