@@ -30,12 +30,15 @@ const requiredKeys = [
 ];
 
 const envPath = resolve(root, '.env');
-let env;
+let env = { ...process.env };
 try {
-  env = parseEnv(readFileSync(envPath, 'utf-8'));
+  env = { ...env, ...parseEnv(readFileSync(envPath, 'utf-8')) };
 } catch {
-  console.error('Error: .env file not found. Copy .env.example to .env and fill in your Firebase values.');
-  process.exit(1);
+  if (!requiredKeys.some((key) => env[key])) {
+    console.error('Error: .env file not found and Firebase env vars are missing.');
+    console.error('Copy .env.example to .env locally, or set VITE_FIREBASE_* in your deployment environment.');
+    process.exit(1);
+  }
 }
 
 const missing = requiredKeys.filter((key) => !env[key]);

@@ -7,7 +7,6 @@
     "generate:firebase-config": "node scripts/generate-firebase-config.js",
     "predev": "npm run generate:firebase-config",
     "dev": "vite",
-    "prebuild": "npm run generate:firebase-config",
     "build": "vite build",
     "preview": "vite preview"
   },
